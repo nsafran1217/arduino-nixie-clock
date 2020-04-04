@@ -36,6 +36,11 @@ unsigned long blinkTime = 500;
 unsigned long waitForDisplay = 0; //for displaying mode
 int nextSwitch = 0;
 int displayMode = 0;
+
+int lastHourTen, lastHourOne, lastMinuteTen, lastMinuteOne, lastSecondTen, lastSecondOne;
+int HourTen, HourOne, MinuteTen, MinuteOne, SecondTen, SecondOne;
+int secondsCombined, minutesCombined, hoursCombined;
+
 //0  Time
 //1  Date
 //2  Rotate time and date
@@ -61,6 +66,13 @@ void setup()
   digitalWrite(ROTBTTNPIN, HIGH);
 
   lastStateCLK = digitalRead(ROTCLKPIN);
+  getDateTime();
+  lastHourTen = (hour / 10) % 10;
+  lastHourOne = hour % 10;
+  lastMinuteTen = (minute / 10) % 10;
+  lastMinuteOne = minute % 10;
+  lastSecondTen = (second / 10) % 10;
+  lastSecondOne = second % 10;
 }
 
 int readRotEncoder(int counter) //takes a counter in and spits it back out if it changes
@@ -239,13 +251,13 @@ void normalTimeMode()
   }
   else
   {
-    writeToNixie(hour, minute, second, colons);
+    writeToNixieScroll(hour, minute, second, colons);
   }
 }
 
 void scrollTimeMode()
 {
-    getDateTime();
+  getDateTime();
   if (second % 2 == 0) //too slow, change to millis timer for 500 milliseconds
   {
     colons = 15;
@@ -272,11 +284,8 @@ void scrollTimeMode()
   }
   else
   {
-    writeToNixie(hour, minute, second, colons);
+    writeToNixieScroll(hour, minute, second, colons); //////debug change
   }
-  int lasthour = hour;
-  int lastminute =  minute;
-  int lastsecond = second;
 }
 
 void dateMode()
@@ -355,7 +364,7 @@ void setTime()
 
     switch (digitMod)
     {
-    case 0: //////////////////////////////////////////////////////////down is broken
+    case 0:
       hour = readRotEncoder(hour);
       if (hour != lasthour)
       {
@@ -594,13 +603,104 @@ void getDateTime()
 
 void writeToNixie(int hours, int minutes, int seconds, int divider) //write data to nixie tubes
 {
-  printNixieToSerial(hours, minutes, seconds, divider);
+  printNixieToSerial(hours, minutes, seconds, divider); //degug
   digitalWrite(LATCHPIN, LOW);
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, divider);
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, convertToNixe(seconds));
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, convertToNixe(minutes));
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, convertToNixe(hours));
   digitalWrite(LATCHPIN, HIGH);
+}
+
+void writeToNixieRAW(int hours, int minutes, int seconds, int divider) //write data to nixie tubes RAW
+{
+  //printNixieToSerial(hours, minutes, seconds, divider);
+  digitalWrite(LATCHPIN, LOW);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, divider);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, seconds);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, minutes);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, hours);
+  digitalWrite(LATCHPIN, HIGH);
+}
+
+void writeToNixieScroll(int hours, int minutes, int seconds, int divider) //this will be annoying i need an efficiant way to do this. or brute force it
+{ //this is so messy I hate it
+
+  HourTen = (hours / 10) % 10;
+  HourOne = hours % 10;
+  MinuteTen = (minutes / 10) % 10;
+  MinuteOne = minutes % 10;
+  SecondTen = (seconds / 10) % 10;
+  SecondOne = seconds % 10;
+  ///////
+
+  boolean scrollDigitBool[6] = {SecondOne != lastSecondOne, SecondTen != lastSecondTen, MinuteOne != lastMinuteOne, MinuteTen != lastMinuteTen, HourOne != lastHourOne, HourTen != lastHourTen};
+  if (scrollDigitBool[0])
+  {
+    for (int i = 0; i < 11; i++)
+    {
+      lastSecondOne++;
+      if (scrollDigitBool[1])
+      {
+        lastSecondTen++;
+      }
+      if (scrollDigitBool[2])
+      {
+        lastMinuteOne++;
+      }
+      if (scrollDigitBool[3])
+      {
+        lastMinuteTen++;
+      }
+      if (scrollDigitBool[4])
+      {
+        lastHourOne++;
+      }
+      if (scrollDigitBool[5])
+      {
+        lastHourTen++;
+      }
+      secondsCombined = (lastSecondTen % 10) | ((lastSecondOne % 10) << 4);
+      minutesCombined = (lastMinuteTen % 10) | ((lastMinuteOne % 10) << 4);
+      hoursCombined = (lastHourTen % 10) | ((lastHourOne % 10) << 4);
+      writeToNixieRAW(hoursCombined, minutesCombined, secondsCombined, divider);
+      delay(75);
+    }
+    if (lastSecondTen == 16)
+    {
+      lastSecondTen = 0;
+      if (lastMinuteTen == 16)
+      {
+        lastMinuteTen = 0;
+        if (twelveHourMode)
+        {
+          if (lastHourOne == 13)
+          {
+            lastHourOne = 1;
+            lastHourTen = 0;
+          }
+
+        } else {
+          if (lastHourOne == 14)
+          {
+            lastHourOne = 0;
+            lastHourTen = 0;
+          }
+        }
+      }
+      secondsCombined = (lastSecondTen % 10) | ((lastSecondOne % 10) << 4);
+      minutesCombined = (lastMinuteTen % 10) | ((lastMinuteOne % 10) << 4);
+      hoursCombined = (lastHourTen % 10) | ((lastHourOne % 10) << 4);
+      writeToNixieRAW(hoursCombined, minutesCombined, secondsCombined, divider);
+    }
+  }
+
+  lastHourTen = (hours / 10) % 10;
+  lastHourOne = hours % 10;
+  lastMinuteTen = (minutes / 10) % 10;
+  lastMinuteOne = minutes % 10;
+  lastSecondTen = (seconds / 10) % 10;
+  lastSecondOne = seconds % 10;
 }
 
 int convertToNixe(int num) //convert 2 digit number to display on nixie tubes
