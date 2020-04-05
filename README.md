@@ -4,14 +4,14 @@ Custom IN-12A (ИН-12А) Nixie clock with RTC and arduino
 This code is messy and specific to my board design. 
 I made one change after recieving the boards. I needed a 5volt power pin for the rotary encoder. I scrapped up a trace to a digital pin on the button header and added a bodge wire for 5 volts.
 
-#Main Modes
+# Main Modes
 Adjust by turning rotary encoder
 0: Time mode
 1: Date mode
 2: Rotate mode
 Rotate mode rotates between date and time at a set interval
 
-#Settings menu
+# Settings menu
 Enter settings menu by pressing rotary encoder
 Press it again to change the selected setting
 0: Exit settings menu
