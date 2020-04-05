@@ -1,3 +1,6 @@
+//Made by Nathan Safran 4/4/2020
+//https://github.com/nsafran1217
+
 #include <Wire.h>
 #include <RTClib.h>
 #include <EEPROM.h>
@@ -38,6 +41,7 @@ int poisonTimeSpan = EEPROM.read(poisonTimeSpanADDRESS);
 int poisonTimeStart = EEPROM.read(poisonTimeStartADDRESS);
 int nextPoisonRun;
 boolean dateOrTime = false;
+boolean displayOff = false;
 unsigned long lastBlinkTime = 0; //for flashing display/digits
 unsigned long blinkTime = 500;
 unsigned long waitForDisplay = 0; //for displaying mode
@@ -162,14 +166,20 @@ void loop()
 {
   delay(5);
   getDateTime();
-
-  if (hour > offHour && hour < onHour && onHour != offHour) ///turn off power supply if within range
+  if (hour == offHour && onHour != offHour && !displayOff) ///turn off power supply
   {
+    displayOff = !displayOff;
+    
+  }
+  if (hour == onHour && onHour != offHour && displayOff) ///turn back on
+  {
+    displayOff = !displayOff;
+  }
+
+  if (displayOff){
     digitalWrite(SHTDNPIN, HIGH);
     delay(10000);
-  }
-  else
-  {
+  } else{
     digitalWrite(SHTDNPIN, LOW);
   }
 
@@ -919,7 +929,7 @@ void writeToNixieScroll(int hours, int minutes, int seconds, int divider) //this
       minutesCombined = (lastMinuteTen % 10) | ((lastMinuteOne % 10) << 4);
       hoursCombined = (lastHourTen % 10) | ((lastHourOne % 10) << 4);
       writeToNixieRAW(hoursCombined, minutesCombined, secondsCombined, divider);
-      delay(20);
+      delay(15);
     }
     if (lastSecondTen == 16)
     {
