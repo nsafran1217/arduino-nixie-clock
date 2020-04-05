@@ -6,19 +6,21 @@
 #define LATCHPIN 2
 #define DATAPIN 3
 #define CLOCKPIN 4
-//#define DOWNBUTTONPIN 12
-//#define UPBUTTONPIN 11
-//#define MODEBUTTONPIN 10
 #define ROTCLKPIN 10
 #define ROTDTPIN 9
 #define ROTBTTNPIN 8
+#define SHTDNPIN 5
 
 //EEPROM ADDRESSES
 #define twelveHourModeADDRESS 0
 #define ROTATETIMEADDRESS 1
 #define TRANSMODEADDRESS 2
+#define ONHOURADDRESS 3
+#define OFFHOURADDRESS 4
+#define poisonTimeSpanADDRESS 5
+#define poisonTimeStartADDRESS 6
 
-RTC_DS3231 rtc;
+RTC_DS3231 rtc; //init RTC
 
 int hour, minute, second, year, month, day;
 int colons;
@@ -30,20 +32,24 @@ unsigned long lastButtonPress = 0;
 int rotatespeed = EEPROM.read(ROTATETIMEADDRESS);            //time in seconds, min 4, max 59
 boolean twelveHourMode = EEPROM.read(twelveHourModeADDRESS); //0 for 12, 1 for 24
 int TransMode = EEPROM.read(TRANSMODEADDRESS);
+int onHour = EEPROM.read(ONHOURADDRESS);
+int offHour = EEPROM.read(OFFHOURADDRESS);
+int poisonTimeSpan = EEPROM.read(poisonTimeSpanADDRESS);
+int poisonTimeStart = EEPROM.read(poisonTimeStartADDRESS);
+int nextPoisonRun;
 boolean dateOrTime = false;
-unsigned long lastBlinkTime = 0;
+unsigned long lastBlinkTime = 0; //for flashing display/digits
 unsigned long blinkTime = 500;
 unsigned long waitForDisplay = 0; //for displaying mode
 int nextSwitch = 0;
 int displayMode = 0;
-
-int lastHourTen, lastHourOne, lastMinuteTen, lastMinuteOne, lastSecondTen, lastSecondOne;
-int HourTen, HourOne, MinuteTen, MinuteOne, SecondTen, SecondOne;
-int secondsCombined, minutesCombined, hoursCombined;
-
 //0  Time
 //1  Date
 //2  Rotate time and date
+
+int lastHourTen, lastHourOne, lastMinuteTen, lastMinuteOne, lastSecondTen, lastSecondOne; //for scroll mode
+int HourTen, HourOne, MinuteTen, MinuteOne, SecondTen, SecondOne;
+int secondsCombined, minutesCombined, hoursCombined;
 
 void setup()
 {
@@ -53,13 +59,7 @@ void setup()
   pinMode(LATCHPIN, OUTPUT);
   pinMode(CLOCKPIN, OUTPUT);
   pinMode(DATAPIN, OUTPUT);
-  //pinMode(DOWNBUTTONPIN, INPUT);
-  //pinMode(UPBUTTONPIN, INPUT);
-  //pinMode(MODEBUTTONPIN, INPUT);
-  //digitalWrite(DOWNBUTTONPIN, HIGH);
-  //digitalWrite(UPBUTTONPIN, HIGH);
-  //digitalWrite(MODEBUTTONPIN, HIGH);
-
+  pinMode(SHTDNPIN, OUTPUT);
   pinMode(ROTCLKPIN, INPUT);
   pinMode(ROTDTPIN, INPUT);
   pinMode(ROTBTTNPIN, INPUT);
@@ -73,6 +73,15 @@ void setup()
   lastMinuteOne = minute % 10;
   lastSecondTen = (second / 10) % 10;
   lastSecondOne = second % 10;
+  nextPoisonRun = poisonTimeStart + poisonTimeSpan;
+  while (minute > nextPoisonRun)
+  {
+    nextPoisonRun = nextPoisonRun + poisonTimeSpan;
+    if (nextPoisonRun > 59)
+    {
+      nextPoisonRun = nextPoisonRun - 60;
+    }
+  }
 }
 
 int readRotEncoder(int counter) //takes a counter in and spits it back out if it changes
@@ -129,30 +138,52 @@ int changeMode(int mode, int numOfModes) //numofmodes starts at 0! display mode 
 {
   int lastmode = mode;
   mode = readRotEncoder(mode);
-  if (mode > 2) //if mode invalid, loop around
+  if (mode > numOfModes) //if mode invalid, loop around
   {
     mode = 0;
   }
   else if (mode < 0)
   {
-    mode = 2;
+    mode = numOfModes;
   }
   if (mode != lastmode)
   {
     waitForDisplay = millis();
     while (millis() - waitForDisplay < 500)
     {
-      delay(10);
+      delay(5);
       writeToNixie(mode, 255, 255, 0);
       mode = changeMode(mode, numOfModes);
     }
   }
   return mode;
 }
-void loop() //bro change all this to rotate with up down buttons. option should edit the settings
+void loop()
 {
-  delay(10);
-  if (readRotButton()) //enter set menu
+  delay(5);
+  getDateTime();
+
+  if (hour > offHour && hour < onHour && onHour != offHour) ///turn off power supply if within range
+  {
+    digitalWrite(SHTDNPIN, HIGH);
+    delay(10000);
+  }
+  else
+  {
+    digitalWrite(SHTDNPIN, LOW);
+  }
+
+  if (minute == nextPoisonRun)
+  {
+    antiPoison();
+    nextPoisonRun = nextPoisonRun + poisonTimeSpan;
+    if (nextPoisonRun > 59)
+    {
+      nextPoisonRun = nextPoisonRun - 60;
+    }
+  }
+
+  if (readRotButton()) //enter settings menu
   {
     settingsMenu();
   }
@@ -183,11 +214,70 @@ void settingsMenu()
 {
   int settingsMode = 0;
   boolean exitSettings = false;
+  lastBlinkTime = millis();
   while (!exitSettings)
   {
-    delay(10);
-    settingsMode = readRotEncoder(settingsMode);
-    writeToNixie(settingsMode, 255, 255, 0);
+    delay(5);
+    settingsMode = displayMode = changeMode(displayMode, 7);
+    switch (settingsMode)
+    {
+    case 0: //exit, just have number
+      writeToNixie(settingsMode, 255, 255, 0);
+      break;
+    case 1: //change time
+      if ((millis() - lastBlinkTime) < blinkTime)
+      {
+        writeToNixie(hour, minute, second, 15);
+      }
+      else if (((millis() - lastBlinkTime) > blinkTime * 2))
+      {
+        writeToNixie(hour, minute, second, 15);
+        lastBlinkTime = millis(); //reset timer
+      }
+      else
+      {
+        writeToNixie(255, 255, 255, 15);
+      }
+      break;
+    case 2: //change date
+      if ((millis() - lastBlinkTime) < blinkTime)
+      {
+        writeToNixie(month, day, year, 6);
+      }
+      else if (((millis() - lastBlinkTime) > blinkTime * 2))
+      {
+        writeToNixie(month, day, year, 6);
+        lastBlinkTime = millis(); //reset timer
+      }
+      else
+      {
+        writeToNixie(255, 255, 255, 15);
+      }
+      break;
+    case 3: //set date time rotation speed
+      writeToNixie(settingsMode, 255, rotatespeed, 0);
+      break;
+    case 4: //setHourDisplay
+      if (twelveHourMode)
+      {
+        writeToNixie(settingsMode, 255, 12, 0);
+      }
+      else
+      {
+        writeToNixie(settingsMode, 255, 24, 0);
+      }
+      break;
+    case 5: //set setTransitionMode
+      writeToNixie(settingsMode, 255, TransMode, 0);
+      break;
+    case 6: //set on off time for display
+      writeToNixie(settingsMode, offHour, onHour, 8);
+      break;
+    case 7:
+      writeToNixie(settingsMode, poisonTimeStart, poisonTimeSpan, 8);
+      break;
+    }
+
     if (readRotButton())
     {
       switch (settingsMode)
@@ -210,21 +300,18 @@ void settingsMenu()
       case 5:
         setTransitionMode();
         break;
+      case 6:
+        setOnOffTime();
+        break;
+      case 7:
+        setAntiPoisonMinute();
+        break;
       }
-    }
-    if (settingsMode > 5)
-    {
-      settingsMode = 0;
-    }
-    if (settingsMode < 0)
-    {
-      settingsMode = 5;
     }
   }
 }
 void normalTimeMode()
 {
-  getDateTime();
   if (second % 2 == 0) //too slow, change to millis timer for 500 milliseconds
   {
     colons = 15;
@@ -251,13 +338,12 @@ void normalTimeMode()
   }
   else
   {
-    writeToNixieScroll(hour, minute, second, colons);
+    writeToNixie(hour, minute, second, colons);
   }
 }
 
 void scrollTimeMode()
 {
-  getDateTime();
   if (second % 2 == 0) //too slow, change to millis timer for 500 milliseconds
   {
     colons = 15;
@@ -270,16 +356,16 @@ void scrollTimeMode()
   {
     if (hour > 12)
     {
-      writeToNixie(hour - 12, minute, second, colons);
+      writeToNixieScroll(hour - 12, minute, second, colons);
     }
     else if (hour == 00)
     {
-      writeToNixie(12, minute, second, colons);
+      writeToNixieScroll(12, minute, second, colons);
     }
 
     else
     {
-      writeToNixie(hour, minute, second, colons);
+      writeToNixieScroll(hour, minute, second, colons);
     }
   }
   else
@@ -290,8 +376,6 @@ void scrollTimeMode()
 
 void dateMode()
 {
-  getDateTime();
-
   //printtime(); //debug
   if (second % 2 == 0) //too slow, change to millis timer for 500 milliseconds
   {
@@ -317,6 +401,16 @@ void rotateMode()
   else
   {
     dateMode();
+  }
+}
+void antiPoison()
+{
+  int j;
+  for (int i = 0; i < 10; i++)
+  {
+    j = i | ((i) << 4);
+    writeToNixieRAW(j, j, j, 15);
+    delay(1000);
   }
 }
 void setTime()
@@ -537,11 +631,11 @@ void setHourDisplay()
     }
     if (twelveHourMode)
     {
-      writeToNixie(12, 255, 255, 0);
+      writeToNixie(255, 255, 12, 0);
     }
     else
     {
-      writeToNixie(24, 255, 255, 0);
+      writeToNixie(255, 255, 24, 0);
     }
   }
   if (origBool != twelveHourMode) //thi sis not working
@@ -554,7 +648,7 @@ void setRotationSpeed()
   int origRotateSpeed = rotatespeed;
   while (!readRotButton())
   {
-    delay(10);
+    delay(5);
     rotatespeed = readRotEncoder(rotatespeed);
     if (rotatespeed > 59)
     {
@@ -590,6 +684,167 @@ void setTransitionMode()
     EEPROM.write(TRANSMODEADDRESS, TransMode); //commit change to EEPROM
   }
 }
+void setOnOffTime() ////////////////////////////////////////////////////////////////////////
+{
+  int origOffHour = offHour; //
+  int origOnHour = onHour;
+  int lastOnHour, lastOffHour;
+  int varMod = 0;
+  lastBlinkTime = millis();
+  while (varMod < 2)
+  {
+    delay(5);
+    lastOffHour = offHour;
+    lastOnHour = onHour;
+    if (readRotButton())
+    {
+      varMod++;
+    }
+    if ((millis() - lastBlinkTime) < blinkTime)
+    {
+      writeToNixie(255, offHour, onHour, 8);
+    }
+    else if (((millis() - lastBlinkTime) > blinkTime * 2))
+    {
+      writeToNixie(255, offHour, onHour, 8);
+      lastBlinkTime = millis(); //reset timer
+    }
+    else
+    {
+      switch (varMod)
+      {
+      case 0:
+        writeToNixie(255, 255, onHour, 8);
+        break;
+      case 1:
+        writeToNixie(255, offHour, 255, 8);
+        break;
+      }
+    }
+    switch (varMod)
+    {
+    case 0:
+      offHour = readRotEncoder(offHour); //
+      if (offHour != lastOffHour)
+      {
+        lastBlinkTime = millis(); //reset timer
+        if (offHour > 23)
+        {
+          offHour = 0;
+        }
+        if (offHour < 0)
+        {
+          offHour = 23;
+        }
+      }
+      break;
+    case 1:
+      onHour = readRotEncoder(onHour); //
+      if (onHour != lastOnHour)
+      {
+        lastBlinkTime = millis(); //reset timer
+        if (onHour > 23)
+        {
+          onHour = 0;
+        }
+        if (onHour < 0)
+        {
+          onHour = 23;
+        }
+      }
+      break;
+    }
+  }
+  if (origOffHour != offHour)
+  {
+    EEPROM.write(OFFHOURADDRESS, offHour); //commit change to EEPROM
+  }
+  if (origOnHour != onHour)
+  {
+    EEPROM.write(ONHOURADDRESS, onHour); //commit change to EEPROM
+  }
+}
+void setAntiPoisonMinute()
+{
+  int origpoisonTimeSpan = poisonTimeSpan; //
+  int origpoisonTimeStart = poisonTimeStart;
+  int lastPoisonTimeStart, lastPoisonTimeSpan;
+  int varMod = 0;
+  lastBlinkTime = millis();
+  while (varMod < 2)
+  {
+    delay(5);
+    lastPoisonTimeStart = poisonTimeStart;
+    lastPoisonTimeSpan = poisonTimeSpan;
+    if (readRotButton())
+    {
+      varMod++;
+    }
+    if ((millis() - lastBlinkTime) < blinkTime)
+    {
+      writeToNixie(255, poisonTimeStart, poisonTimeSpan, 8);
+    }
+    else if (((millis() - lastBlinkTime) > blinkTime * 2))
+    {
+      writeToNixie(255, poisonTimeStart, poisonTimeSpan, 8);
+      lastBlinkTime = millis(); //reset timer
+    }
+    else
+    {
+      switch (varMod)
+      {
+      case 0:
+        writeToNixie(255, 255, poisonTimeSpan, 8);
+        break;
+      case 1:
+        writeToNixie(255, poisonTimeStart, 255, 8);
+        break;
+      }
+    }
+    switch (varMod)
+    {
+    case 0:
+      poisonTimeStart = readRotEncoder(poisonTimeStart); //
+      if (poisonTimeStart != lastPoisonTimeStart)
+      {
+        lastBlinkTime = millis(); //reset timer
+        if (poisonTimeStart > 59)
+        {
+          poisonTimeStart = 0;
+        }
+        if (poisonTimeStart < 0)
+        {
+          poisonTimeStart = 59;
+        }
+      }
+      break;
+    case 1:
+      poisonTimeSpan = readRotEncoder(poisonTimeSpan); //
+      if (poisonTimeSpan != lastPoisonTimeSpan)
+      {
+        lastBlinkTime = millis(); //reset timer
+        if (poisonTimeSpan > 59)
+        {
+          poisonTimeSpan = 0;
+        }
+        if (poisonTimeSpan < 0)
+        {
+          poisonTimeSpan = 59;
+        }
+      }
+      break;
+    }
+  }
+  if (origpoisonTimeStart != poisonTimeStart)
+  {
+    EEPROM.write(poisonTimeStartADDRESS, poisonTimeStart); //commit change to EEPROM
+  }
+  if (origpoisonTimeSpan != poisonTimeSpan)
+  {
+    EEPROM.write(poisonTimeSpanADDRESS, poisonTimeSpan); //commit change to EEPROM
+  }
+}
+
 void getDateTime()
 {
   DateTime now = rtc.now();
@@ -603,7 +858,7 @@ void getDateTime()
 
 void writeToNixie(int hours, int minutes, int seconds, int divider) //write data to nixie tubes
 {
-  printNixieToSerial(hours, minutes, seconds, divider); //degug
+  //printNixieToSerial(hours, minutes, seconds, divider); //degug
   digitalWrite(LATCHPIN, LOW);
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, divider);
   shiftOut(DATAPIN, CLOCKPIN, MSBFIRST, convertToNixe(seconds));
@@ -624,7 +879,7 @@ void writeToNixieRAW(int hours, int minutes, int seconds, int divider) //write d
 }
 
 void writeToNixieScroll(int hours, int minutes, int seconds, int divider) //this will be annoying i need an efficiant way to do this. or brute force it
-{ //this is so messy I hate it
+{                                                                         //this is so messy I hate it
 
   HourTen = (hours / 10) % 10;
   HourOne = hours % 10;
@@ -664,7 +919,7 @@ void writeToNixieScroll(int hours, int minutes, int seconds, int divider) //this
       minutesCombined = (lastMinuteTen % 10) | ((lastMinuteOne % 10) << 4);
       hoursCombined = (lastHourTen % 10) | ((lastHourOne % 10) << 4);
       writeToNixieRAW(hoursCombined, minutesCombined, secondsCombined, divider);
-      delay(75);
+      delay(20);
     }
     if (lastSecondTen == 16)
     {
@@ -679,8 +934,9 @@ void writeToNixieScroll(int hours, int minutes, int seconds, int divider) //this
             lastHourOne = 1;
             lastHourTen = 0;
           }
-
-        } else {
+        }
+        else
+        {
           if (lastHourOne == 14)
           {
             lastHourOne = 0;
