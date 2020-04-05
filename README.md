@@ -12,6 +12,7 @@ Adjust by turning rotary encoder
 * 0: Time mode
 * 1: Date mode
 * 2: Rotate mode
+
 Rotate mode rotates between date and time at a set interval
 
 # Settings menu
